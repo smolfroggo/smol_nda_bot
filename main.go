@@ -16,10 +16,10 @@ import (
 var (
 	bot         *tb.Bot
 	passedUsers = sync.Map{}
-	token       = os.Getenv("TGTOKEN") // export TGTOKEN=xxx before running
+	token       = os.Getenv("TGTOKEN") // export TGTOKEN=xxxx before running
 
 	timeoutSecs = 60
-	ndaFilePath = "nda.pdf"
+	ndaFilePath = "nda.pdf" // make sure this file exists in the same dir
 )
 
 func main() {
@@ -58,7 +58,7 @@ func challengeUser(m *tb.Message) {
 	chat := m.Chat
 	log.Printf("👤 User %s (%d) joined chat %s (%d)", user.Username, user.ID, chat.Title, chat.ID)
 
-	// Restrict user (mute)
+	// Restrict user (mute immediately)
 	restricted := tb.ChatMember{
 		User:            user,
 		Rights:          tb.NoRights(),
@@ -68,17 +68,16 @@ func challengeUser(m *tb.Message) {
 		log.Printf("⚠️ Failed to restrict %s: %v", user.Username, err)
 	}
 
-	// Open NDA file
-	f, err := os.Open(ndaFilePath)
-	if err != nil {
-		log.Printf("⚠️ Cannot open NDA PDF: %v", err)
-		return
+	// NDA document (sent from disk with filename and MIME)
+	doc := &tb.Document{
+		File:     tb.FromDisk(ndaFilePath),
+		FileName: "NDA.pdf",
+		MIME:     "application/pdf",
+		Caption: fmt.Sprintf(
+			"👋 Welcome @%s!\n\n📜 Please review the NDA (PDF attached) and click Agree within %d seconds, or you will be removed.",
+			user.Username, timeoutSecs),
 	}
-	doc := &tb.Document{File: tb.FromReader(f), Caption: fmt.Sprintf(
-		"👋 Welcome @%s!\n\n📜 Please review the NDA (PDF attached) and click Agree within %d seconds, or you will be removed.",
-		user.Username, timeoutSecs)}
 
-	// Inline button
 	btn := tb.InlineButton{
 		Unique: "agree",
 		Text:   "✅ I Agree to NDA",
@@ -86,13 +85,15 @@ func challengeUser(m *tb.Message) {
 	}
 	inlineKeys := [][]tb.InlineButton{{btn}}
 
-	msg, err := bot.Send(chat, doc, &tb.ReplyMarkup{InlineKeyboard: inlineKeys})
+	msg, err := bot.Send(chat, doc, &tb.SendOptions{
+		ReplyMarkup: &tb.ReplyMarkup{InlineKeyboard: inlineKeys},
+	})
 	if err != nil {
 		log.Printf("⚠️ Failed to send NDA: %v", err)
 		return
 	}
 
-	// Kick if timeout
+	// Kick if timeout expires
 	time.AfterFunc(time.Duration(timeoutSecs)*time.Second, func() {
 		if _, ok := passedUsers.Load(user.ID); !ok {
 			if err := bot.Ban(chat, &tb.ChatMember{User: user}); err != nil {
