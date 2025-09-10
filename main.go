@@ -16,12 +16,10 @@ import (
 var (
 	bot         *tb.Bot
 	passedUsers = sync.Map{}
-	token       = os.Getenv("TGTOKEN") // export TGTOKEN=xxxx before run
+	token       = os.Getenv("TGTOKEN") // export TGTOKEN=xxx before running
 
-	welcomeMsg  = "📜 Before participating, you must agree to this NDA:\n\n[Insert NDA text or link here]\n\nClick below to accept within %d seconds, or you will be removed."
-	successMsg  = "✅ %s has agreed to the NDA and can now chat."
-	failMsg     = "❌ %s did not agree to the NDA in time and was removed."
 	timeoutSecs = 60
+	ndaFilePath = "nda.pdf"
 )
 
 func main() {
@@ -38,10 +36,10 @@ func main() {
 		log.Fatalf("Cannot start bot: %v", err)
 	}
 
-	// New members
+	// Handle new users
 	bot.Handle(tb.OnUserJoined, challengeUser)
 
-	// NDA agreement button (catch all "agree_" callbacks)
+	// Handle NDA agreement button
 	bot.Handle(&tb.InlineButton{Unique: "agree"}, passChallenge)
 
 	log.Println("🤖 NDA Bot started!")
@@ -60,7 +58,7 @@ func challengeUser(m *tb.Message) {
 	chat := m.Chat
 	log.Printf("👤 User %s (%d) joined chat %s (%d)", user.Username, user.ID, chat.Title, chat.ID)
 
-	// Restrict user immediately (mute)
+	// Restrict user (mute)
 	restricted := tb.ChatMember{
 		User:            user,
 		Rights:          tb.NoRights(),
@@ -70,27 +68,37 @@ func challengeUser(m *tb.Message) {
 		log.Printf("⚠️ Failed to restrict %s: %v", user.Username, err)
 	}
 
-	// NDA message with button
+	// Open NDA file
+	f, err := os.Open(ndaFilePath)
+	if err != nil {
+		log.Printf("⚠️ Cannot open NDA PDF: %v", err)
+		return
+	}
+	doc := &tb.Document{File: tb.FromReader(f), Caption: fmt.Sprintf(
+		"👋 Welcome @%s!\n\n📜 Please review the NDA (PDF attached) and click Agree within %d seconds, or you will be removed.",
+		user.Username, timeoutSecs)}
+
+	// Inline button
 	btn := tb.InlineButton{
 		Unique: "agree",
 		Text:   "✅ I Agree to NDA",
-		Data:   strconv.FormatInt(user.ID, 10), // store userID in button data
+		Data:   strconv.FormatInt(user.ID, 10), // store userID in data
 	}
 	inlineKeys := [][]tb.InlineButton{{btn}}
 
-	msg, err := bot.Reply(m, fmt.Sprintf(welcomeMsg, timeoutSecs), &tb.ReplyMarkup{InlineKeyboard: inlineKeys})
+	msg, err := bot.Send(chat, doc, &tb.ReplyMarkup{InlineKeyboard: inlineKeys})
 	if err != nil {
-		log.Printf("⚠️ Failed to send NDA message: %v", err)
+		log.Printf("⚠️ Failed to send NDA: %v", err)
 		return
 	}
 
-	// Kick after timeout if no agreement
+	// Kick if timeout
 	time.AfterFunc(time.Duration(timeoutSecs)*time.Second, func() {
 		if _, ok := passedUsers.Load(user.ID); !ok {
 			if err := bot.Ban(chat, &tb.ChatMember{User: user}); err != nil {
 				log.Printf("⚠️ Failed to kick %s: %v", user.Username, err)
 			}
-			bot.Edit(msg, fmt.Sprintf(failMsg, user.FirstName))
+			bot.Edit(msg, fmt.Sprintf("❌ %s did not agree to the NDA in time and was removed.", user.FirstName))
 			log.Printf("⛔ %s (%d) kicked from chat %s", user.Username, user.ID, chat.Title)
 		}
 		passedUsers.Delete(user.ID)
@@ -103,7 +111,6 @@ func passChallenge(c *tb.Callback) {
 
 	expectedID := c.Data
 	if expectedID != strconv.FormatInt(user.ID, 10) {
-		// Someone else clicked
 		bot.Respond(c, &tb.CallbackResponse{Text: "⚠️ This button isn’t for you!"})
 		return
 	}
@@ -120,8 +127,8 @@ func passChallenge(c *tb.Callback) {
 		log.Printf("⚠️ Failed to unrestrict %s: %v", user.Username, err)
 	}
 
-	// Update message
-	bot.Edit(c.Message, fmt.Sprintf(successMsg, user.FirstName))
+	// Update group message
+	bot.Edit(c.Message, fmt.Sprintf("✅ %s has agreed to the NDA and can now chat.", user.FirstName))
 	bot.Respond(c, &tb.CallbackResponse{Text: "✅ NDA accepted, welcome!"})
 
 	log.Printf("✅ User %s (%d) accepted NDA in chat %s", user.Username, user.ID, chat.Title)
