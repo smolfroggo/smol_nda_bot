@@ -19,7 +19,7 @@ var (
 	token       = os.Getenv("TGTOKEN") // export TGTOKEN=xxxx before running
 
 	timeoutSecs = 60
-	ndaFilePath = "nda.pdf" // make sure this file exists in the same dir
+	ndaFilePath = "nda.pdf" // make sure nda.pdf exists in this dir
 )
 
 func main() {
@@ -58,17 +58,17 @@ func challengeUser(m *tb.Message) {
 	chat := m.Chat
 	log.Printf("👤 User %s (%d) joined chat %s (%d)", user.Username, user.ID, chat.Title, chat.ID)
 
-	// Restrict user (mute immediately)
+	// Restrict user immediately (mute)
 	restricted := tb.ChatMember{
 		User:            user,
-		Rights:          tb.NoRights(),
 		RestrictedUntil: tb.Forever(),
+		Rights:          tb.Rights{CanSendMessages: false},
 	}
 	if err := bot.Restrict(chat, &restricted); err != nil {
 		log.Printf("⚠️ Failed to restrict %s: %v", user.Username, err)
 	}
 
-	// NDA document (sent from disk with filename and MIME)
+	// NDA document with inline button
 	doc := &tb.Document{
 		File:     tb.FromDisk(ndaFilePath),
 		FileName: "NDA.pdf",
@@ -81,7 +81,7 @@ func challengeUser(m *tb.Message) {
 	btn := tb.InlineButton{
 		Unique: "agree",
 		Text:   "✅ I Agree to NDA",
-		Data:   strconv.FormatInt(user.ID, 10), // store userID in data
+		Data:   strconv.FormatInt(user.ID, 10),
 	}
 	inlineKeys := [][]tb.InlineButton{{btn}}
 
@@ -93,13 +93,18 @@ func challengeUser(m *tb.Message) {
 		return
 	}
 
-	// Kick if timeout expires
+	// Kick if timeout
 	time.AfterFunc(time.Duration(timeoutSecs)*time.Second, func() {
 		if _, ok := passedUsers.Load(user.ID); !ok {
 			if err := bot.Ban(chat, &tb.ChatMember{User: user}); err != nil {
 				log.Printf("⚠️ Failed to kick %s: %v", user.Username, err)
 			}
-			bot.Edit(msg, fmt.Sprintf("❌ %s did not agree to the NDA in time and was removed.", user.FirstName))
+			// Delete NDA message
+			if err := bot.Delete(msg); err != nil {
+				log.Printf("⚠️ Failed to delete NDA message: %v", err)
+			}
+			// Post short fail notice
+			bot.Send(chat, fmt.Sprintf("❌ %s did not agree to the NDA in time and was removed.", user.FirstName))
 			log.Printf("⛔ %s (%d) kicked from chat %s", user.Username, user.ID, chat.Title)
 		}
 		passedUsers.Delete(user.ID)
@@ -118,18 +123,27 @@ func passChallenge(c *tb.Callback) {
 
 	passedUsers.Store(user.ID, struct{}{})
 
-	// Unrestrict user
+	// Unrestrict user (allow messaging again)
 	member := tb.ChatMember{
 		User:            user,
-		Rights:          tb.Rights{CanSendMessages: true, CanSendMedia: true, CanSendPolls: true},
 		RestrictedUntil: tb.Forever(),
+		Rights: tb.Rights{
+			CanSendMessages: true,
+			CanSendMedia:    true,
+			CanSendPolls:    true,
+		},
 	}
 	if err := bot.Promote(chat, &member); err != nil {
 		log.Printf("⚠️ Failed to unrestrict %s: %v", user.Username, err)
 	}
 
-	// Update group message
-	bot.Edit(c.Message, fmt.Sprintf("✅ %s has agreed to the NDA and can now chat.", user.FirstName))
+	// Delete the NDA challenge message
+	if err := bot.Delete(c.Message); err != nil {
+		log.Printf("⚠️ Failed to delete NDA message: %v", err)
+	}
+
+	// Confirmation to group
+	bot.Send(chat, fmt.Sprintf("✅ %s has agreed to the NDA and can now chat.", user.FirstName))
 	bot.Respond(c, &tb.CallbackResponse{Text: "✅ NDA accepted, welcome!"})
 
 	log.Printf("✅ User %s (%d) accepted NDA in chat %s", user.Username, user.ID, chat.Title)
