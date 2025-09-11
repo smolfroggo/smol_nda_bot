@@ -1,6 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
 const { message } = require('telegraf/filters');
-const fs = require('fs');
 
 // Check if token exists
 if (!process.env.TGTOKEN) {
@@ -8,9 +7,16 @@ if (!process.env.TGTOKEN) {
   process.exit(1);
 }
 
+// Check if admin ID exists
+if (!process.env.ADMIN_ID) {
+  console.error('❌ ADMIN_ID environment variable not set!');
+  process.exit(1);
+}
+
 console.log('✅ Bot token found');
 console.log('🔍 Token format check:', process.env.TGTOKEN.match(/^\d+:[A-Za-z0-9_-]+$/) ? 'VALID' : 'INVALID');
 console.log('📏 Token length:', process.env.TGTOKEN.length);
+console.log('👮 Admin ID:', process.env.ADMIN_ID);
 
 const bot = new Telegraf(process.env.TGTOKEN);
 
@@ -18,11 +24,15 @@ const bot = new Telegraf(process.env.TGTOKEN);
 const passedUsers = new Map(); // chatId -> Set of userIds
 const ndaMessages = new Map(); // "chatId_userId" -> messageId
 
-// NDA file configuration
-const NDA_FILE_ID = 'BQACAgUAAxkDAANIaMKSwmOUEF0CYqQjiadr-lazs5gAAnMaAAJJRBlW-u-sU7SoPLg2BA';
+// NDA configuration
+let NDA_FILE_ID = null; // Will be set via /upload_nda command
+const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 const NDA_BUTTON_TEXT = '✅ I Agree to the NDA';
 const NDA_TIMEOUT_SECONDS = 60;
 const BAN_DURATION_MINUTES = 10;
+
+// Flag to track if admin is uploading NDA
+let waitingForNDA = false;
 
 // Commands
 bot.command('start', (ctx) => {
@@ -38,6 +48,37 @@ bot.command('test', (ctx) => {
 bot.command('healthz', (ctx) => {
   console.log(`🏥 Healthz request from user: ${ctx.from.username || ctx.from.first_name} in chat: ${ctx.chat.title || 'private'}`);
   return ctx.reply('I\'m OK! 🤖');
+});
+
+// Admin command to initiate NDA upload
+bot.command('upload_nda', async (ctx) => {
+  // Check if admin
+  if (ctx.from.id !== ADMIN_ID) {
+    return ctx.reply('❌ Only the admin can use this command');
+  }
+  
+  waitingForNDA = true;
+  return ctx.reply('📎 Please send the NDA PDF file now...');
+});
+
+// Handle document uploads from admin
+bot.on('document', async (ctx) => {
+  // Check if it's from admin and we're waiting for NDA
+  if (ctx.from.id === ADMIN_ID && waitingForNDA) {
+    waitingForNDA = false;
+    
+    // Save the file ID
+    NDA_FILE_ID = ctx.message.document.file_id;
+    
+    console.log(`[ADMIN] NDA file updated: ${ctx.message.document.file_name} (${NDA_FILE_ID})`);
+    
+    return ctx.reply(
+      `✅ NDA file set successfully!\n` +
+      `📄 File: ${ctx.message.document.file_name || 'document'}\n` +
+      `📦 Size: ${(ctx.message.document.file_size / 1024).toFixed(2)} KB\n` +
+      `This file will be used for all new members.`
+    );
+  }
 });
 
 // Handle member changes using chat_member (more reliable than new_chat_members)
@@ -76,6 +117,14 @@ bot.on(message('new_chat_members'), async (ctx) => {
 // Extract the member handling logic
 async function handleNewMember(ctx, member) {
   console.log(`[EVENT] User ${member.username || member.first_name} (${member.id}) joined chat ${ctx.chat.title} (${ctx.chat.id})`);
+  
+  // Check if NDA file is configured
+  if (!NDA_FILE_ID) {
+    console.error('[ERROR] No NDA file configured');
+    await ctx.reply('⚠️ Bot not configured. Admin needs to run /upload_nda with the NDA file.');
+    return;
+  }
+  
   const chatId = ctx.chat.id;
 
   if (!passedUsers.has(chatId)) {
@@ -250,6 +299,7 @@ bot.launch({
     const botInfo = await bot.telegram.getMe();
     console.log(`✅ Bot started: ${botInfo.first_name} (@${botInfo.username})`);
     console.log('⏰ Waiting for updates...');
+    console.log('⚠️  Remember to run /upload_nda then send your NDA file to configure the bot!');
   } catch (error) {
     console.error('❌ Failed to get bot info:', error);
   }
