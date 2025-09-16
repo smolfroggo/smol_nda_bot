@@ -103,17 +103,6 @@ bot.on('my_chat_member', async (ctx) => {
   // This is just for the bot itself, not other users
 });
 
-// Also keep the original handler as backup
-bot.on(message('new_chat_members'), async (ctx) => {
-  console.log('🎉 NEW CHAT MEMBERS FILTER TRIGGERED!');
-  const newMembers = ctx.message.new_chat_members;
-  
-  for (const member of newMembers) {
-    if (member.is_bot) continue;
-    await handleNewMember(ctx, member);
-  }
-});
-
 // Extract the member handling logic
 async function handleNewMember(ctx, member) {
   console.log(`[EVENT] User ${member.username || member.first_name} (${member.id}) joined chat ${ctx.chat.title} (${ctx.chat.id})`);
