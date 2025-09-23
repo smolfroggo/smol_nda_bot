@@ -141,10 +141,15 @@ async function handleNewMember(ctx, member) {
       Markup.button.callback(NDA_BUTTON_TEXT, `nda_agree_${chatId}_${member.id}`)
     ]);
     
-    const ndaMessage = await ctx.replyWithDocument(NDA_FILE_ID, {
-      caption: `📄 ${displayName}, please review the NDA and click below to agree.`,
-      reply_markup: keyboard.reply_markup
-    });
+    // const ndaMessage = await ctx.replyWithDocument(NDA_FILE_ID, {
+    //   caption: `📄 ${displayName}, please review the NDA and click below to agree.`,
+    //   reply_markup: keyboard.reply_markup
+    // });
+
+    const ndaMessage = await ctx.replyWithMarkdown(
+      `📄 ${displayName}, please review the [NDA](https://metamask.io/alphafox) and click below to agree.`,
+      keyboard
+    );
     
     console.log(`[ACTION] NDA sent to ${member.username || member.first_name} in chat ${ctx.chat.title}`);
     
