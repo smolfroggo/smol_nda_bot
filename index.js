@@ -147,7 +147,7 @@ async function handleNewMember(ctx, member) {
     // });
 
     const ndaMessage = await ctx.replyWithMarkdown(
-      `📄 ${displayName}, please review the [NDA](https://metamask.io/alphafox) and click below to agree.`,
+      `📄 ${displayName}, please review the [NDA](https://metamask.io/metamask-nda) and click below to agree.`,
       keyboard
     );
     
